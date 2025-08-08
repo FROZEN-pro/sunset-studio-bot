@@ -1,0 +1,453 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+
+class ProfileHandler {
+    constructor() {
+        // Foydalanuvchi sevimlilari (memory da)
+        this.userFavorites = new Map();
+    }
+
+    async handle(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        try {
+            const user = await sheetsService.getUser(userId);
+            const userName = Helpers.formatUserName(msg.from);
+            
+            if (!user) {
+                await bot.sendMessage(chatId, '❌ Foydalanuvchi ma\'lumotlari topilmadi', {
+                    reply_markup: Keyboards.getMainMenu()
+                });
+                return;
+            }
+
+            const profileMessage = await this.getProfileMessage(userId, userName, user);
+
+            await bot.sendMessage(chatId, profileMessage, {
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getProfileKeyboard()
+            });
+
+        } catch (error) {
+            console.error('Profile handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    async getProfileMessage(userId, userName, user) {
+        const joinDate = Helpers.formatDate(user.created_at);
+        const isAdmin = user.is_admin === 'true';
+        
+        // Statistikalarni olish
+        const favorites = this.getUserFavorites(userId);
+        const favoriteCount = favorites.length;
+        
+        // Umumiy statistika
+        const stats = await sheetsService.getStats();
+
+        let message = `👤 <b>Sizning Profilingiz</b>\n\n`;
+        message += `👋 <b>Ism:</b> ${userName}\n`;
+        message += `🆔 <b>ID:</b> <code>${userId}</code>\n`;
+        message += `📅 <b>Qo'shildi:</b> ${joinDate}\n`;
+        message += `${isAdmin ? '🔑 <b>Status:</b> Admin\n' : '👤 <b>Status:</b> Foydalanuvchi\n'}\n`;
+        
+        message += `📊 <b>Sizning statistikangiz:</b>\n`;
+        message += `❤️ Sevimlilar: ${favoriteCount} ta\n`;
+        message += `📺 Oxirgi faollik: Bugun\n\n`;
+        
+        message += `🌟 <b>Platforma statistikasi:</b>\n`;
+        message += `👥 Foydalanuvchilar: ${stats.total_users}\n`;
+        message += `📺 Jami kontent: ${stats.total_content}\n`;
+        message += `🎌 Anime: ${stats.anime_count}\n`;
+        message += `🎬 Filmlar: ${stats.movie_count}\n\n`;
+        
+        message += `👇 <i>Qo'shimcha ma'lumotlar uchun tugmalardan foydalaning</i>`;
+
+        return message;
+    }
+
+    async showFavorites(bot, chatId, userId) {
+        try {
+            const favorites = this.getUserFavorites(userId);
+            
+            if (favorites.length === 0) {
+                await bot.sendMessage(chatId, '❤️ <b>Sevimlilar</b>\n\n📝 Sizning sevimlilar ro\'yxatingiz bo\'sh\n\n💡 Kontentlarni ko\'rib, ❤️ tugmasini bosib sevimli qiling!', {
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🏠 Bosh Menyu', callback_data: 'main_menu' }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            // Sevimli kontentlar ma'lumotlarini olish
+            const favoriteContents = [];
+            for (const contentId of favorites) {
+                const content = await sheetsService.getContentById(contentId);
+                if (content) {
+                    favoriteContents.push(content);
+                }
+            }
+
+            await this.sendFavoritesList(bot, chatId, favoriteContents, 1);
+
+        } catch (error) {
+            console.error('Show favorites xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async sendFavoritesList(bot, chatId, favorites, page = 1) {
+        const itemsPerPage = 5;
+        const paginatedFavorites = Helpers.paginate(favorites, page, itemsPerPage);
+
+        let message = `❤️ <b>Sevimli Kontentlaringiz</b>\n\n`;
+        message += `📊 <b>Jami:</b> ${favorites.length} ta sevimli\n\n`;
+
+        paginatedFavorites.data.forEach((content, index) => {
+            const emoji = Helpers.addEmoji(content.type);
+            const number = ((page - 1) * itemsPerPage) + index + 1;
+            message += `${number}. ${emoji} <b>${content.title}</b>\n`;
+            message += `   📺 ${content.type} | ${content.genre}\n`;
+            message += `   📅 ${Helpers.formatDate(content.created_at)}\n\n`;
+        });
+
+        if (paginatedFavorites.totalPages > 1) {
+            message += `📄 <b>Sahifa:</b> ${page}/${paginatedFavorites.totalPages}\n\n`;
+        }
+
+        message += `👇 <i>Kontentni tanlang:</i>`;
+
+        const keyboard = this.getFavoritesKeyboard(
+            paginatedFavorites.data, 
+            page, 
+            paginatedFavorites.totalPages
+        );
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+        });
+    }
+
+    getFavoritesKeyboard(favorites, currentPage, totalPages) {
+        const keyboard = [];
+
+        // Favorite content buttons
+        favorites.forEach(content => {
+            const emoji = Helpers.addEmoji(content.type);
+            keyboard.push([{
+                text: `${emoji} ${content.title}`,
+                callback_data: `content_${content.id}`
+            }]);
+        });
+
+        // Pagination
+        if (totalPages > 1) {
+            const navButtons = [];
+            
+            if (currentPage > 1# 🚀 SunSet Studio - 3-BOSQICH: QO'SHIMCHA HANDLERLAR
+
+## 🔍 3.1: Search Handler Yaratish
+
+### `handlers/search.js` fayli:
+```javascript
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+
+class SearchHandler {
+    constructor() {
+        // Qidiruv sessiyalarini saqlash (memory da)
+        this.searchSessions = new Map();
+    }
+
+    async startSearch(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        try {
+            // Qidiruv sessionini boshlash
+            this.searchSessions.set(userId, { 
+                active: true, 
+                startTime: Date.now(),
+                chatId: chatId 
+            });
+
+            const searchMessage = `🔍 <b>Qidiruv</b>
+
+📝 <b>Qidiruv qilish uchun:</b>
+- Anime yoki film nomini yozing
+- Janr nomini yozing (masalan: action, comedy)
+- Qisqa tavsif yozing
+
+💡 <b>Misol qidiruvlar:</b>
+- "naruto"
+- "action anime"
+- "comedy film"
+- "ninja"
+
+✏️ <b>Qidirmoqchi bo'lgan narsangizni yozing:</b>`;
+
+            await bot.sendMessage(chatId, searchMessage, {
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getCancelKeyboard()
+            });
+
+        } catch (error) {
+            console.error('Search start xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    async handleSearchQuery(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const query = msg.text.trim();
+
+        try {
+            // Session tekshirish
+            const session = this.searchSessions.get(userId);
+            if (!session || !session.active) {
+                return; // Session yo'q yoki faol emas
+            }
+
+            // Bekor qilish
+            if (query === '❌ Bekor Qilish') {
+                this.searchSessions.delete(userId);
+                await bot.sendMessage(chatId, '❌ Qidiruv bekor qilindi', {
+                    reply_markup: Keyboards.getMainMenu()
+                });
+                return;
+            }
+
+            // Qidiruv so'zini tozalash
+            const cleanQuery = Helpers.sanitizeSearchQuery(query);
+            if (cleanQuery.length < 2) {
+                await bot.sendMessage(chatId, '⚠️ Qidiruv so\'zi juda qisqa. Kamida 2 ta harf kiriting.');
+                return;
+            }
+
+            // Loading xabari
+            const loadingMsg = await bot.sendMessage(chatId, Helpers.getLoadingMessage());
+
+            // Qidiruvni amalga oshirish
+            const results = await sheetsService.searchContent(cleanQuery);
+
+            // Session tugatish
+            this.searchSessions.delete(userId);
+
+            await bot.deleteMessage(chatId, loadingMsg.message_id);
+
+            if (results.length === 0) {
+                await this.sendNoResultsMessage(bot, chatId, query);
+                return;
+            }
+
+            await this.sendSearchResults(bot, chatId, results, query, 1);
+
+        } catch (error) {
+            console.error('Search query xatosi:', error);
+            this.searchSessions.delete(userId);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    async sendSearchResults(bot, chatId, results, query, page = 1) {
+        const itemsPerPage = 5;
+        const paginatedResults = Helpers.paginate(results, page, itemsPerPage);
+
+        let message = `🔍 <b>Qidiruv natijalari: "${query}"</b>\n\n`;
+        message += `📊 <b>Topildi:</b> ${results.length} ta kontent\n\n`;
+
+        paginatedResults.data.forEach((content, index) => {
+            const emoji = Helpers.addEmoji(content.type);
+            const number = ((page - 1) * itemsPerPage) + index + 1;
+            message += `${number}. ${emoji} <b>${content.title}</b>\n`;
+            message += `   📺 ${content.type} | ${content.genre}\n`;
+            message += `   📝 ${Helpers.truncateText(content.description, 50)}\n\n`;
+        });
+
+        if (paginatedResults.totalPages > 1) {
+            message += `📄 <b>Sahifa:</b> ${page}/${paginatedResults.totalPages}\n\n`;
+        }
+
+        message += `👇 <i>Kontentni ko'rish uchun tanlang:</i>`;
+
+        const keyboard = this.getSearchResultsKeyboard(
+            paginatedResults.data, 
+            query, 
+            page, 
+            paginatedResults.totalPages
+        );
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+        });
+    }
+
+    getSearchResultsKeyboard(results, query, currentPage, totalPages) {
+        const keyboard = [];
+
+        // Content buttons
+        results.forEach(content => {
+            const emoji = Helpers.addEmoji(content.type);
+            keyboard.push([{
+                text: `${emoji} ${content.title}`,
+                callback_data: `content_${content.id}`
+            }]);
+        });
+
+        // Pagination
+        if (totalPages > 1) {
+            const navButtons = [];
+            
+            if (currentPage > 1) {
+                navButtons.push({
+                    text: '⬅️ Oldingi',
+                    callback_data: `search_${query}_page_${currentPage - 1}`
+                });
+            }
+            
+            navButtons.push({
+                text: `${currentPage}/${totalPages}`,
+                callback_data: 'search_page_info'
+            });
+            
+            if (currentPage < totalPages) {
+                navButtons.push({
+                    text: 'Keyingi ➡️',
+                    callback_data: `search_${query}_page_${currentPage + 1}`
+                });
+            }
+            
+            keyboard.push(navButtons);
+        }
+
+        // Action buttons
+        keyboard.push([
+            {
+                text: '🔄 Yangi Qidiruv',
+                callback_data: 'start_search'
+            },
+            {
+                text: '🏠 Bosh Menyu',
+                callback_data: 'main_menu'
+            }
+        ]);
+
+        return { inline_keyboard: keyboard };
+    }
+
+    async sendNoResultsMessage(bot, chatId, query) {
+        const message = `🔍 <b>Qidiruv natijalari: "${query}"</b>
+
+❌ <b>Hech narsa topilmadi</b>
+
+💡 <b>Tavsiyalar:</b>
+- Boshqa so'zlar bilan qidiring
+- Qisqaroq so'z ishlatib ko'ring
+- Ingliz tilida ham qidiring
+- Janr nomini yozing (action, comedy, drama)
+
+🔄 <b>Yana qidirish yoki bosh menyuga qaytishingiz mumkin</b>`;
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Yana Qidiruv', callback_data: 'start_search' },
+                        { text: '🏠 Bosh Menyu', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        });
+    }
+
+    async handleSearchResults(bot, chatId, query, page, messageId) {
+        try {
+            const results = await sheetsService.searchContent(query);
+            
+            if (results.length === 0) {
+                return;
+            }
+
+            const itemsPerPage = 5;
+            const paginatedResults = Helpers.paginate(results, page, itemsPerPage);
+
+            let message = `🔍 <b>Qidiruv natijalari: "${query}"</b>\n\n`;
+            message += `📊 <b>Topildi:</b> ${results.length} ta kontent\n\n`;
+
+            paginatedResults.data.forEach((content, index) => {
+                const emoji = Helpers.addEmoji(content.type);
+                const number = ((page - 1) * itemsPerPage) + index + 1;
+                message += `${number}. ${emoji} <b>${content.title}</b>\n`;
+                message += `   📺 ${content.type} | ${content.genre}\n`;
+                message += `   📝 ${Helpers.truncateText(content.description, 50)}\n\n`;
+            });
+
+            if (paginatedResults.totalPages > 1) {
+                message += `📄 <b>Sahifa:</b> ${page}/${paginatedResults.totalPages}\n\n`;
+            }
+
+            message += `👇 <i>Kontentni ko'rish uchun tanlang:</i>`;
+
+            const keyboard = this.getSearchResultsKeyboard(
+                paginatedResults.data, 
+                query, 
+                page, 
+                paginatedResults.totalPages
+            );
+
+            await bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'HTML',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            console.error('Search results handler xatosi:', error);
+        }
+    }
+
+    isUserInSearchMode(userId) {
+        const session = this.searchSessions.get(userId);
+        return session && session.active;
+    }
+
+    // Session tozalash (har 30 daqiqada)
+    cleanupSessions() {
+        const now = Date.now();
+        const timeout = 30 * 60 * 1000; // 30 minut
+
+        for (const [userId, session] of this.searchSessions.entries()) {
+            if (now - session.startTime > timeout) {
+                this.searchSessions.delete(userId);
+                console.log(`Search session tozalandi: ${userId}`);
+            }
+        }
+    }
+}
+
+// Singleton pattern
+const searchHandler = new SearchHandler();
+
+// Har 30 daqiqada session cleanup
+setInterval(() => {
+    searchHandler.cleanupSessions();
+}, 30 * 60 * 1000);
+
+module.exports = searchHandler;

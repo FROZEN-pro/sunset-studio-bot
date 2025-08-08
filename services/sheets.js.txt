@@ -1,0 +1,242 @@
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+
+class SheetsService {
+    constructor() {
+        this.doc = new GoogleSpreadsheet(process.env.SHEET_ID);
+        this.isAuthenticated = false;
+    }
+
+    async authenticate() {
+        if (this.isAuthenticated) return;
+        
+        try {
+            const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+            await this.doc.useServiceAccountAuth(credentials);
+            await this.doc.loadInfo();
+            this.isAuthenticated = true;
+            console.log('✅ Google Sheets ga ulanish muvaffaqiyatli');
+        } catch (error) {
+            console.error('❌ Google Sheets xatosi:', error);
+            throw error;
+        }
+    }
+
+    // Foydalanuvchi operatsiyalari
+    async getUser(userId) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['users'];
+        const rows = await sheet.getRows();
+        
+        return rows.find(row => row.user_id == userId);
+    }
+
+    async createUser(userData) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['users'];
+        
+        const newRow = await sheet.addRow({
+            user_id: userData.user_id,
+            name: userData.name,
+            is_admin: userData.is_admin || 'false',
+            created_at: new Date().toISOString().split('T')[0]
+        });
+        
+        return newRow;
+    }
+
+    // Content operatsiyalari
+    async getAllContent() {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['content'];
+        const rows = await sheet.getRows();
+        
+        return rows.map(row => ({
+            id: row.id,
+            title: row.title,
+            type: row.type,
+            genre: row.genre,
+            description: row.description,
+            image_url: row.image_url,
+            video_data: JSON.parse(row.video_data || '{}'),
+            episodes_data: JSON.parse(row.episodes_data || '[]'),
+            trend_position: row.trend_position,
+            created_at: row.created_at
+        }));
+    }
+
+    async getContentById(id) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['content'];
+        const rows = await sheet.getRows();
+        
+        const row = rows.find(r => r.id == id);
+        if (!row) return null;
+        
+        return {
+            id: row.id,
+            title: row.title,
+            type: row.type,
+            genre: row.genre,
+            description: row.description,
+            image_url: row.image_url,
+            video_data: JSON.parse(row.video_data || '{}'),
+            episodes_data: JSON.parse(row.episodes_data || '[]'),
+            trend_position: row.trend_position,
+            created_at: row.created_at
+        };
+    }
+
+    async searchContent(query) {
+        await this.authenticate();
+        const allContent = await this.getAllContent();
+        
+        const searchTerm = query.toLowerCase();
+        return allContent.filter(content => 
+            content.title.toLowerCase().includes(searchTerm) ||
+            content.description.toLowerCase().includes(searchTerm) ||
+            content.genre.toLowerCase().includes(searchTerm)
+        );
+    }
+
+    async getTrendingContent() {
+        await this.authenticate();
+        const allContent = await this.getAllContent();
+        
+        return allContent
+            .filter(content => content.trend_position > 0)
+            .sort((a, b) => a.trend_position - b.trend_position);
+    }
+
+    async getContentByType(type) {
+        await this.authenticate();
+        const allContent = await this.getAllContent();
+        
+        return allContent.filter(content => content.type === type);
+    }
+
+    async getContentByGenre(genre) {
+        await this.authenticate();
+        const allContent = await this.getAllContent();
+        
+        return allContent.filter(content => content.genre === genre);
+    }
+
+    // Settings operatsiyalari
+    async getSetting(key) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['settings'];
+        const rows = await sheet.getRows();
+        
+        const row = rows.find(r => r.key === key);
+        return row ? row.value : null;
+    }
+
+    async getAllSettings() {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['settings'];
+        const rows = await sheet.getRows();
+        
+        const settings = {};
+        rows.forEach(row => {
+            settings[row.key] = row.value;
+        });
+        
+        return settings;
+    }
+
+    // Genres operatsiyalari
+    async getAllGenres() {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['genres'];
+        const rows = await sheet.getRows();
+        
+        return rows.map(row => ({
+            id: row.id,
+            name: row.name
+        }));
+    }
+
+    // Admin operatsiyalari
+    async isAdmin(userId) {
+        const user = await this.getUser(userId);
+        return user && user.is_admin === 'true';
+    }
+
+    async addContent(contentData) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['content'];
+        
+        // Yangi ID yaratish
+        const rows = await sheet.getRows();
+        const maxId = Math.max(...rows.map(r => parseInt(r.id) || 0), 0);
+        const newId = maxId + 1;
+        
+        const newRow = await sheet.addRow({
+            id: newId,
+            title: contentData.title,
+            type: contentData.type,
+            genre: contentData.genre,
+            description: contentData.description,
+            image_url: contentData.image_url,
+            video_data: JSON.stringify(contentData.video_data),
+            episodes_data: JSON.stringify(contentData.episodes_data || []),
+            trend_position: contentData.trend_position || 0,
+            created_at: new Date().toISOString().split('T')[0]
+        });
+        
+        return newId;
+    }
+
+    async updateContent(id, updateData) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['content'];
+        const rows = await sheet.getRows();
+        
+        const row = rows.find(r => r.id == id);
+        if (!row) return false;
+        
+        // Faqat berilgan maydonlarni yangilash
+        Object.keys(updateData).forEach(key => {
+            if (key === 'video_data' || key === 'episodes_data') {
+                row[key] = JSON.stringify(updateData[key]);
+            } else {
+                row[key] = updateData[key];
+            }
+        });
+        
+        await row.save();
+        return true;
+    }
+
+    async deleteContent(id) {
+        await this.authenticate();
+        const sheet = this.doc.sheetsByTitle['content'];
+        const rows = await sheet.getRows();
+        
+        const row = rows.find(r => r.id == id);
+        if (!row) return false;
+        
+        await row.delete();
+        return true;
+    }
+
+    // Statistika
+    async getStats() {
+        await this.authenticate();
+        const usersSheet = this.doc.sheetsByTitle['users'];
+        const contentSheet = this.doc.sheetsByTitle['content'];
+        
+        const users = await usersSheet.getRows();
+        const content = await contentSheet.getRows();
+        
+        return {
+            total_users: users.length,
+            total_content: content.length,
+            anime_count: content.filter(c => c.type === 'anime').length,
+            movie_count: content.filter(c => c.type === 'movie').length,
+            admins_count: users.filter(u => u.is_admin === 'true').length
+        };
+    }
+}
+
+module.exports = new SheetsService();

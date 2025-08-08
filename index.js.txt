@@ -1,0 +1,533 @@
+const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
+const config = require('./config');
+
+// Handlers
+const StartHandler = require('./handlers/start');
+const HomeHandler = require('./handlers/home');
+const SearchHandler = require('./handlers/search');
+
+// Services
+const sheetsService = require('./services/sheets');
+const keyboards = require('./utils/keyboards');
+const helpers = require('./utils/helpers');
+
+// Express app
+const app = express();
+app.use(express.json());
+
+// Bot yaratish
+const bot = new TelegramBot(config.BOT_TOKEN, { 
+    webHook: true 
+});
+
+// Webhook o'rnatish
+const webhookUrl = `${config.WEBHOOK_URL}/webhook`;
+bot.setWebHook(webhookUrl);
+
+// Express middleware
+app.post('/webhook', (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
+// Health check
+app.get('/', (req, res) => {
+    res.json({ 
+        status: 'Bot ishlamoqda!',
+        name: config.APP_NAME,
+        version: config.VERSION,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Bot event handlers
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const userId = msg.from.id;
+
+    console.log(`Message from ${userId}: ${text}`);
+
+    try {
+        // Start komandasi
+        if (text === '/start') {
+            await StartHandler.handle(bot, msg);
+            return;
+        }
+
+        // Deep link
+        if (text && text.startsWith('/start ')) {
+            const param = text.replace('/start ', '');
+            await StartHandler.handleDeepLink(bot, msg, param);
+            return;
+        }
+
+        // Qidiruv rejimida bo'lsa
+        if (SearchHandler.isSearchMode(chatId)) {
+            await SearchHandler.processSearch(bot, msg);
+            return;
+        }
+
+        // Tugma bosilganda
+        switch (text) {
+            case config.BUTTONS.HOME:
+                await HomeHandler.handle(bot, msg);
+                break;
+
+            case config.BUTTONS.SEARCH:
+                await SearchHandler.handle(bot, msg);
+                break;
+
+            case config.BUTTONS.TRENDING:
+                await handleTrending(bot, msg);
+                break;
+
+            case config.BUTTONS.ANIME:
+                await handleAnime(bot, msg);
+                break;
+
+            case config.BUTTONS.MOVIES:
+                await handleMovies(bot, msg);
+                break;
+
+            case config.BUTTONS.PROFILE:
+                await handleProfile(bot, msg);
+                break;
+
+            case config.BUTTONS.ADMIN:
+                const isAdmin = await sheetsService.isAdmin(userId);
+                if (isAdmin) {
+                    await handleAdminPanel(bot, msg);
+                } else {
+                    await bot.sendMessage(chatId, helpers.getErrorMessage('permission'));
+                }
+                break;
+
+            default:
+                // Noma'lum xabar
+                await bot.sendMessage(chatId, 
+                    '❓ Kechirasiz, bu komandani tushunmadim.\n\nPastdagi tugmalardan birini tanlang:',
+                    keyboards.mainMenu()
+                );
+        }
+
+    } catch (error) {
+        console.error('Message handler error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+});
+
+// Callback query handler
+bot.on('callback_query', async (callbackQuery) => {
+    const msg = callbackQuery.message;
+    const data = callbackQuery.data;
+    const chatId = msg.chat.id;
+    const userId = callbackQuery.from.id;
+
+    console.log(`Callback from ${userId}: ${data}`);
+
+    try {
+        // Callback javobini yuborish
+        await bot.answerCallbackQuery(callbackQuery.id);
+
+        // Callback turlariga qarab ishlov berish
+        if (data.startsWith('content_')) {
+            const contentId = data.replace('content_', '');
+            const content = await sheetsService.getContentById(contentId);
+            
+            if (content) {
+                await StartHandler.sendContentDetails(bot, chatId, content);
+            }
+        }
+        else if (data.startsWith('watch_')) {
+            const contentId = data.replace('watch_', '');
+            await handleWatchContent(bot, chatId, contentId);
+        }
+        else if (data.startsWith('search_page_')) {
+            // Search sahifalash
+            const parts = data.replace('search_page_', '').split('_');
+            const page = parseInt(parts[0]);
+            const query = parts.slice(1).join('_');
+            
+            const results = await sheetsService.searchContent(query);
+            const paginatedResults = helpers.paginate(results, page, 5);
+            
+            await SearchHandler.sendSearchResults(bot, chatId, query, paginatedResults);
+        }
+        else if (data === 'back_to_main') {
+            await HomeHandler.handle(bot, { chat: { id: chatId }, from: { id: userId } });
+        }
+
+    } catch (error) {
+        console.error('Callback query error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+});
+
+// Additional handlers
+async function handleTrending(bot, msg) {
+    const chatId = msg.chat.id;
+    
+    try {
+        const loadingMsg = await bot.sendMessage(chatId, helpers.getLoadingMessage());
+        
+        const trendingContent = await sheetsService.getTrendingContent();
+        
+        await bot.deleteMessage(chatId, loadingMsg.message_id);
+        
+        if (trendingContent.length === 0) {
+            await bot.sendMessage(chatId, 
+                '🔥 Hozircha mashhur kontentlar yo\'q',
+                keyboards.backButton()
+            );
+            return;
+        }
+
+        let trendingText = '🔥 **Mashhur Kontentlar**\n\n';
+        
+        trendingContent.slice(0, 10).forEach((content, index) => {
+            const position = index + 1;
+            const emoji = position <= 3 ? ['🥇', '🥈', '🥉'][position - 1] : `${position}.`;
+            
+            trendingText += `${emoji} **${content.title}**\n`;
+            trendingText += `   🎭 ${content.genre} | ${helpers.addEmoji(content.type)} ${content.type}\n`;
+            trendingText += `   📝 ${helpers.truncateText(content.description, 50)}\n\n`;
+        });
+
+        const buttons = trendingContent.slice(0, 10).map((content, index) => [{
+            text: `${index + 1}. ${helpers.truncateText(content.title, 25)}`,
+            callback_data: `content_${content.id}`
+        }]);
+
+        buttons.push([{
+            text: config.BUTTONS.BACK,
+            callback_data: 'back_to_main'
+        }]);
+
+        await bot.sendMessage(chatId, trendingText, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: buttons
+            }
+        });
+
+    } catch (error) {
+        console.error('Trending handler error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function handleAnime(bot, msg) {
+    const chatId = msg.chat.id;
+    
+    try {
+        const loadingMsg = await bot.sendMessage(chatId, helpers.getLoadingMessage());
+        
+        const animeContent = await sheetsService.getContentByType('anime');
+        
+        await bot.deleteMessage(chatId, loadingMsg.message_id);
+        
+        if (animeContent.length === 0) {
+            await bot.sendMessage(chatId, 
+                '🎌 Hozircha anime yo\'q',
+                keyboards.backButton()
+            );
+            return;
+        }
+
+        const paginatedContent = helpers.paginate(animeContent, 1, 8);
+        await sendContentList(bot, chatId, '🎌 Anime Seriali', paginatedContent);
+
+    } catch (error) {
+        console.error('Anime handler error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function handleMovies(bot, msg) {
+    const chatId = msg.chat.id;
+    
+    try {
+        const loadingMsg = await bot.sendMessage(chatId, helpers.getLoadingMessage());
+        
+        const movieContent = await sheetsService.getContentByType('movie');
+        
+        await bot.deleteMessage(chatId, loadingMsg.message_id);
+        
+        if (movieContent.length === 0) {
+            await bot.sendMessage(chatId, 
+                '🎬 Hozircha filmlar yo\'q',
+                keyboards.backButton()
+            );
+            return;
+        }
+
+        const paginatedContent = helpers.paginate(movieContent, 1, 8);
+        await sendContentList(bot, chatId, '🎬 Filmlar', paginatedContent);
+
+    } catch (error) {
+        console.error('Movies handler error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function handleProfile(bot, msg) {
+    const chatId = msg.chat.id;
+    const user = msg.from;
+    
+    try {
+        const userData = await sheetsService.getUser(user.id);
+        const isAdmin = await sheetsService.isAdmin(user.id);
+        
+        const profileText = `👤 **Sizning Profilingiz**
+
+👨‍💻 **Ism:** ${helpers.formatUserName(user)}
+🆔 **ID:** ${user.id}
+📅 **Qo'shilgan:** ${userData ? helpers.formatDate(userData.created_at) : 'Noma\'lum'}
+🎭 **Status:** ${isAdmin ? '👑 Admin' : '👤 Foydalanuvchi'}
+
+📊 **Statistika:**
+- Jami kontentlar: ${await getTotalContentCount()}
+- Sizning sevimlilaringiz: 0 ta
+
+🔗 **Botni ulashish:**
+Bu botni do'stlaringizga ulashing va birgalikda anime tomosha qiling!
+
+/start@${await getBotUsername()}`;
+
+        const shareButton = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { 
+                            text: '📤 Botni Ulashish', 
+                            switch_inline_query: 'SunSet Studio - Anime va filmlar platformasi!' 
+                        }
+                    ],
+                    [
+                        { text: config.BUTTONS.BACK, callback_data: 'back_to_main' }
+                    ]
+                ]
+            }
+        };
+
+        await bot.sendMessage(chatId, profileText, {
+            parse_mode: 'Markdown',
+            ...shareButton
+        });
+
+    } catch (error) {
+        console.error('Profile handler error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function handleAdminPanel(bot, msg) {
+    const chatId = msg.chat.id;
+    
+    try {
+        const stats = await sheetsService.getStats();
+        
+        const adminText = `🔑 **Admin Panel**
+
+📊 **Statistika:**
+- Jami foydalanuvchilar: ${stats.total_users}
+- Jami kontentlar: ${stats.total_content}
+- Anime: ${stats.anime_count}
+- Filmlar: ${stats.movie_count}
+- Adminlar: ${stats.admins_count}
+
+⚡ **Tezkor amallar:**
+Quyidagi tugmalar orqali kontent boshqaring:`;
+
+        await bot.sendMessage(chatId, adminText, {
+            parse_mode: 'Markdown',
+            ...keyboards.adminPanel()
+        });
+
+    } catch (error) {
+        console.error('Admin panel error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function handleWatchContent(bot, chatId, contentId) {
+    try {
+        const content = await sheetsService.getContentById(contentId);
+        
+        if (!content) {
+            await bot.sendMessage(chatId, helpers.getErrorMessage('notfound'));
+            return;
+        }
+
+        const videoData = content.video_data;
+        
+        if (!videoData || !videoData.file_id) {
+            await bot.sendMessage(chatId, '❌ Video fayli topilmadi');
+            return;
+        }
+
+        // Video yuborish
+        await bot.sendVideo(chatId, videoData.file_id, {
+            caption: `🎬 **${content.title}**\n\n📝 ${content.description}`,
+            parse_mode: 'Markdown'
+        });
+
+        // Qo'shimcha amallar
+        const additionalActions = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '⬇️ Yuklab Olish', callback_data: `download_${contentId}` },
+                        { text: '❤️ Sevimli', callback_data: `favorite_${contentId}` }
+                    ],
+                    [
+                        { text: '📤 Ulashish', callback_data: `share_${contentId}` },
+                        { text: '🔙 Orqaga', callback_data: 'back_to_main' }
+                    ]
+                ]
+            }
+        };
+
+        await bot.sendMessage(chatId, 
+            '✅ Video yuborildi! Quyidagi amallarni bajarishingiz mumkin:',
+            additionalActions
+        );
+
+    } catch (error) {
+        console.error('Watch content error:', error);
+        await bot.sendMessage(chatId, helpers.getErrorMessage());
+    }
+}
+
+async function sendContentList(bot, chatId, title, paginatedContent) {
+    let listText = `${title}\n\n`;
+    listText += `📊 Jami: ${paginatedContent.totalItems} ta\n\n`;
+
+    paginatedContent.data.forEach((content, index) => {
+        const number = (paginatedContent.currentPage - 1) * 8 + index + 1;
+        listText += `${number}. **${content.title}**\n`;
+        listText += `   🎭 ${content.genre} | 📅 ${helpers.formatDate(content.created_at)}\n\n`;
+    });
+
+    const buttons = paginatedContent.data.map((content, index) => {
+        const number = (paginatedContent.currentPage - 1) * 8 + index + 1;
+        return [{
+            text: `${number}. ${helpers.truncateText(content.title, 25)}`,
+            callback_data: `content_${content.id}`
+        }];
+    });
+
+    // Sahifalash tugmalari
+    if (paginatedContent.totalPages > 1) {
+        const paginationRow = [];
+        
+        if (paginatedContent.hasPrev) {
+            paginationRow.push({
+                text: '◀️ Oldingi',
+                callback_data: `list_page_${paginatedContent.currentPage - 1}`
+            });
+        }
+        
+        paginationRow.push({
+            text: `${paginatedContent.currentPage}/${paginatedContent.totalPages}`,
+            callback_data: 'current_page'
+        });
+        
+        if (paginatedContent.hasNext) {
+            paginationRow.push({
+                text: 'Keyingi ▶️',
+                callback_data: `list_page_${paginatedContent.currentPage + 1}`
+            });
+        }
+        
+        buttons.push(paginationRow);
+    }
+
+    buttons.push([{
+        text: config.BUTTONS.BACK,
+        callback_data: 'back_to_main'
+    }]);
+
+    await bot.sendMessage(chatId, listText, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: buttons
+        }
+    });
+}
+
+// Helper functions
+async function getTotalContentCount() {
+    try {
+        const stats = await sheetsService.getStats();
+        return helpers.formatNumber(stats.total_content);
+    } catch {
+        return '0';
+    }
+}
+
+async function getBotUsername() {
+    try {
+        const botInfo = await bot.getMe();
+        return botInfo.username;
+    } catch {
+        return 'sunset_studio_bot';
+    }
+}
+
+// Error handling
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Server ishga tushirish
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server ${PORT} portida ishlamoqda`);
+    console.log(`🤖 Bot username: @${getBotUsername()}`);
+    console.log(`🌐 Webhook URL: ${webhookUrl}`);
+    console.log(`✅ ${config.APP_NAME} tayyor!`);
+});
+
+### 6️⃣ `vercel.json` - Deployment sozlamalari
+```json
+{
+  "version": 2,
+  "name": "sunset-studio-bot",
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/webhook",
+      "dest": "/index.js",
+      "methods": ["POST"]
+    },
+    {
+      "src": "/",
+      "dest": "/index.js",
+      "methods": ["GET"]
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "index.js": {
+      "includeFiles": "**"
+    }
+  }
+}

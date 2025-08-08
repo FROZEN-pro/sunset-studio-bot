@@ -1,0 +1,49 @@
+require('dotenv').config();
+
+module.exports = {
+    // Bot sozlamalari
+    BOT_TOKEN: process.env.BOT_TOKEN,
+    WEBHOOK_URL: process.env.WEBHOOK_URL,
+    PORT: process.env.PORT || 3000,
+    
+    // Admin sozlamalari
+    MAIN_ADMIN_ID: process.env.MAIN_ADMIN_ID,
+    
+    // Google Sheets
+    SHEET_ID: process.env.SHEET_ID,
+    GOOGLE_CREDENTIALS: process.env.GOOGLE_CREDENTIALS,
+    
+    // Telegram kanallar
+    STORAGE_CHANNEL: process.env.STORAGE_CHANNEL,
+    TEST_CHANNEL: process.env.TEST_CHANNEL,
+    
+    // Image hosting
+    IMGBB_API_KEY: process.env.IMGBB_API_KEY,
+    
+    // App sozlamalari
+    APP_NAME: 'SunSet Studio',
+    VERSION: '1.0.0',
+    
+    // Limitlar
+    MAX_SEARCH_RESULTS: 10,
+    MAX_TRENDING_ITEMS: 15,
+    
+    // Keyboard tugmalar
+    BUTTONS: {
+        HOME: '🏠 Bosh Menyu',
+        SEARCH: '🔍 Qidiruv',
+        TRENDING: '🔥 Mashhur',
+        ANIME: '🎌 Anime',
+        MOVIES: '🎬 Filmlar',
+        PROFILE: '👤 Profil',
+        SETTINGS: '⚙️ Sozlamalar',
+        ADMIN: '🔑 Admin Panel',
+        BACK: '◀️ Orqaga',
+        NEXT: '▶️ Keyingi',
+        PREV: '◀️ Oldingi',
+        WATCH: '▶️ Tomosha Qilish',
+        DOWNLOAD: '⬇️ Yuklab Olish',
+        FAVORITE: '❤️ Sevimli',
+        SHARE: '📤 Ulashish'
+    }
+};

@@ -1,0 +1,162 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+const config = require('../config');
+
+class StartHandler {
+    static async handle(bot, msg, match) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const userName = Helpers.formatUserName(msg.from);
+
+        try {
+            // Loading xabari
+            const loadingMsg = await bot.sendMessage(chatId, Helpers.getLoadingMessage());
+
+            // Foydalanuvchini tekshirish va yaratish
+            let user = await sheetsService.getUser(userId);
+            
+            if (!user) {
+                // Yangi foydalanuvchi yaratish
+                await sheetsService.createUser({
+                    user_id: userId,
+                    name: userName,
+                    is_admin: userId == config.MAIN_ADMIN_ID ? 'true' : 'false'
+                });
+                
+                // Xush kelibsiz xabari
+                const welcomeMessage = this.getWelcomeMessage(userName);
+                
+                await bot.editMessageText(welcomeMessage, {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: user && user.is_admin === 'true' 
+                        ? Keyboards.getAdminMenu() 
+                        : Keyboards.getMainMenu()
+                });
+                
+                return;
+            }
+
+            // Deep link parametrini tekshirish
+            if (match && match[1]) {
+                const param = match[1];
+                await bot.deleteMessage(chatId, loadingMsg.message_id);
+                return await this.handleDeepLink(bot, chatId, param);
+            }
+
+            // Oddiy start xabari
+            const startMessage = this.getStartMessage(userName);
+            const isAdmin = await sheetsService.isAdmin(userId);
+            
+            await bot.editMessageText(startMessage, {
+                chat_id: chatId,
+                message_id: loadingMsg.message_id,
+                parse_mode: 'HTML',
+                reply_markup: isAdmin ? Keyboards.getAdminMenu() : Keyboards.getMainMenu()
+            });
+
+        } catch (error) {
+            console.error('Start handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    static async handleDeepLink(bot, chatId, param) {
+        try {
+            if (param.startsWith('content_')) {
+                const contentId = param.replace('content_', '');
+                const content = await sheetsService.getContentById(contentId);
+                
+                if (!content) {
+                    return await bot.sendMessage(chatId, '❌ Kontent topilmadi', {
+                        reply_markup: Keyboards.getMainMenu()
+                    });
+                }
+
+                return await this.sendContentDetails(bot, chatId, content);
+            }
+
+            // Boshqa deep link parametrlari...
+            
+        } catch (error) {
+            console.error('Deep link xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage(), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    static async sendContentDetails(bot, chatId, content) {
+        const message = this.formatContentMessage(content);
+        const hasEpisodes = content.episodes_data && content.episodes_data.length > 0;
+        
+        if (content.image_url) {
+            await bot.sendPhoto(chatId, content.image_url, {
+                caption: message,
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getContentKeyboard(content.id, hasEpisodes)
+            });
+        } else {
+            await bot.sendMessage(chatId, message, {
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getContentKeyboard(content.id, hasEpisodes)
+            });
+        }
+    }
+
+    static getWelcomeMessage(userName) {
+        const settings = sheetsService.getAllSettings();
+        
+        return `🎬 <b>Xush kelibsiz, ${userName}!</b>
+
+🌟 <b>${config.APP_NAME}</b> ga xush kelibsiz!
+
+Bu yerda siz:
+📺 <b>Eng so'nggi anime va filmlarni</b> tomosha qilishingiz
+🔍 <b>Qidiruv</b> orqali kerakli kontentni topishingiz  
+🔥 <b>Mashhur</b> va trending kontent bilan tanishishingiz
+❤️ <b>Sevimlilar</b> ro'yxatini yaratishingiz mumkin
+
+🚀 Botdan foydalanishni boshlash uchun quyidagi tugmalardan birini tanlang:
+
+👇 <i>Menyu tugmalaridan foydalaning</i>`;
+    }
+
+    static getStartMessage(userName) {
+        return `🏠 <b>Bosh Menyu</b>
+
+Salom, <b>${userName}</b>! 
+
+🎬 <b>${config.APP_NAME}</b> platformasida xush ko'rdingiz!
+
+📊 <b>Mavjud kontentlar:</b>
+🎌 Anime seriallar va filmlar
+🎬 Eng yangi va mashhur filmlar
+🔥 Trending va top reytingdagi kontentlar
+
+🎯 <b>Nima qilmoqchisiz?</b>
+👇 Quyidagi tugmalardan birini tanlang:`;
+    }
+
+    static formatContentMessage(content) {
+        const emoji = Helpers.addEmoji(content.type);
+        const genre = Helpers.addEmoji(content.genre);
+        
+        return `${emoji} <b>${content.title}</b>
+
+${genre} <b>Janr:</b> ${content.genre}
+📺 <b>Tur:</b> ${content.type}
+📅 <b>Qo'shilgan:</b> ${Helpers.formatDate(content.created_at)}
+
+📝 <b>Tavsif:</b>
+${content.description}
+
+⭐ <i>Tomosha qilish uchun quyidagi tugmani bosing</i>`;
+    }
+}
+
+module.exports = StartHandler;

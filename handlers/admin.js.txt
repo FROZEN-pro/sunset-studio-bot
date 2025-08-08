@@ -1,0 +1,454 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+const axios = require('axios');
+const FormData = require('form-data');
+const config = require('../config');
+
+class AdminHandler {
+    constructor() {
+        this.adminSessions = new Map(); // userId -> {action, data}
+    }
+
+    async handle(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        try {
+            const isAdmin = await sheetsService.isAdmin(userId);
+            
+            if (!isAdmin) {
+                await bot.sendMessage(chatId, '🚫 Sizda admin huquqlari yo\'q');
+                return;
+            }
+
+            const stats = await sheetsService.getStats();
+            
+            const adminMessage = `🔑 <b>Admin Panel</b>\n\n` +
+                `📊 <b>Statistikalar:</b>\n` +
+                `👥 Foydalanuvchilar: ${stats.total_users}\n` +
+                `📺 Jami kontent: ${stats.total_content}\n` +
+                `🎌 Anime: ${stats.anime_count}\n` +
+                `🎬 Filmlar: ${stats.movie_count}\n` +
+                `🔑 Adminlar: ${stats.admins_count}\n\n` +
+                `⚡ <b>Tezkor amallar:</b>\n` +
+                `👇 Kerakli bo'limni tanlang:`;
+
+            await bot.sendMessage(chatId, adminMessage, {
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getAdminKeyboard()
+            });
+
+        } catch (error) {
+            console.error('Admin handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async handleCallback(bot, chatId, params, messageId) {
+        const action = params[0];
+        
+        try {
+            switch (action) {
+                case 'stats':
+                    await this.showDetailedStats(bot, chatId, messageId);
+                    break;
+                case 'add':
+                    if (params[1] === 'content') {
+                        await this.startAddContent(bot, chatId);
+                    }
+                    break;
+                case 'manage':
+                    if (params[1] === 'content') {
+                        await this.showContentManagement(bot, chatId, messageId);
+                    }
+                    break;
+                case 'users':
+                    await this.showUsersManagement(bot, chatId, messageId);
+                    break;
+                case 'broadcast':
+                    await this.startBroadcast(bot, chatId);
+                    break;
+                case 'edit':
+                    const editContentId = params[1];
+                    await this.startEditContent(bot, chatId, editContentId);
+                    break;
+                case 'delete':
+                    const deleteContentId = params[1];
+                    await this.confirmDelete(bot, chatId, deleteContentId);
+                    break;
+            }
+        } catch (error) {
+            console.error('Admin callback xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async showDetailedStats(bot, chatId, messageId) {
+        try {
+            const stats = await sheetsService.getStats();
+            const allContent = await sheetsService.getAllContent();
+            
+            // Genre statistics
+            const genreStats = {};
+            allContent.forEach(content => {
+                genreStats[content.genre] = (genreStats[content.genre] || 0) + 1;
+            });
+
+            // Recent content
+            const recentContent = allContent
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                .slice(0, 5);
+
+            let message = `📊 <b>Batafsil Statistikalar</b>\n\n`;
+            
+            message += `👥 <b>Foydalanuvchilar:</b>\n`;
+            message += `• Jami: ${stats.total_users}\n`;
+            message += `• Adminlar: ${stats.admins_count}\n`;
+            message += `• Oddiy: ${stats.total_users - stats.admins_count}\n\n`;
+            
+            message += `📺 <b>Kontent:</b>\n`;
+            message += `• Jami: ${stats.total_content}\n`;
+            message += `• Anime: ${stats.anime_count}\n`;
+            message += `• Filmlar: ${stats.movie_count}\n\n`;
+            
+            message += `🎭 <b>Janr bo'yicha:</b>\n`;
+            Object.entries(genreStats).forEach(([genre, count]) => {
+                message += `• ${genre}: ${count} ta\n`;
+            });
+            
+            message += `\n📅 <b>So'nggi qo'shilganlar:</b>\n`;
+            recentContent.forEach((content, i) => {
+                const emoji = Helpers.addEmoji(content.type);
+                message += `${i + 1}. ${emoji} ${content.title}\n`;
+            });
+
+            await bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🔙 Admin Panel', callback_data: 'admin_main' }]
+                    ]
+                }
+            });
+
+        } catch (error) {
+            console.error('Show detailed stats xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async startAddContent(bot, chatId) {
+        const userId = bot.currentUserId; // You'll need to track this
+        
+        this.adminSessions.set(userId, {
+            action: 'add_content',
+            step: 'title',
+            data: {}
+        });
+
+        await bot.sendMessage(chatId, `➕ <b>Yangi Kontent Qo'shish</b>\n\n` +
+            `📝 <b>1-qadam: Sarlavha</b>\n\n` +
+            `Kontent nomini kiriting:\n` +
+            `Misol: "Naruto Shippuden"`, {
+            parse_mode: 'HTML',
+            reply_markup: Keyboards.getCancelKeyboard()
+        });
+    }
+
+    async handleAddContentInput(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const text = msg.text?.trim();
+
+        const session = this.adminSessions.get(userId);
+        if (!session || session.action !== 'add_content') return;
+
+        try {
+            switch (session.step) {
+                case 'title':
+                    session.data.title = text;
+                    session.step = 'type';
+                    await bot.sendMessage(chatId, `📺 <b>2-qadam: Tur</b>\n\nKontent turini tanlang:`, {
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '🎌 Anime', callback_data: 'admin_type_anime' },
+                                    { text: '🎬 Film', callback_data: 'admin_type_movie' }
+                                ],
+                                [{ text: '❌ Bekor qilish', callback_data: 'admin_cancel' }]
+                            ]
+                        }
+                    });
+                    break;
+
+                case 'genre':
+                    session.data.genre = text;
+                    session.step = 'description';
+                    await bot.sendMessage(chatId, `📝 <b>4-qadam: Tavsif</b>\n\nKontent haqida qisqa ma'lumot yozing:`, {
+                        parse_mode: 'HTML',
+                        reply_markup: Keyboards.getCancelKeyboard()
+                    });
+                    break;
+
+                case 'description':
+                    session.data.description = text;
+                    session.step = 'image';
+                    await bot.sendMessage(chatId, `🖼 <b>5-qadam: Rasm</b>\n\nKontent uchun rasm yuboring yoki ImgBB linkini kiriting:`, {
+                        parse_mode: 'HTML',
+                        reply_markup: Keyboards.getCancelKeyboard()
+                    });
+                    break;
+            }
+
+        } catch (error) {
+            console.error('Add content input xatosi:', error);
+            this.adminSessions.delete(userId);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async uploadToImgBB(imageBuffer, filename) {
+        try {
+            const form = new FormData();
+            form.append('image', imageBuffer, filename);
+
+            const response = await axios.post(`https://api.imgbb.com/1/upload?key=${config.IMGBB_API_KEY}`, form, {
+                headers: form.getHeaders()
+            });
+
+            return response.data.data.url;
+        } catch (error) {
+            console.error('ImgBB upload xatosi:', error);
+            throw error;
+        }
+    }
+
+    async showContentManagement(bot, chatId, messageId) {
+        try {
+            const allContent = await sheetsService.getAllContent();
+            
+            if (allContent.length === 0) {
+                await bot.editMessageText('📝 <b>Kontent Boshqarish</b>\n\n❌ Hech qanday kontent yo\'q', {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔙 Admin Panel', callback_data: 'admin_main' }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            await this.sendContentManagementList(bot, chatId, messageId, allContent, 1);
+
+        } catch (error) {
+            console.error('Show content management xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async sendContentManagementList(bot, chatId, messageId, content, page = 1) {
+        const itemsPerPage = 8;
+        const paginatedData = Helpers.paginate(content, page, itemsPerPage);
+
+        let message = `📝 <b>Kontent Boshqarish</b>\n\n`;
+        message += `📊 Jami: ${content.length} ta kontent\n`;
+        message += `📄 Sahifa: ${page}/${paginatedData.totalPages}\n\n`;
+
+        paginatedData.data.forEach((item, index) => {
+            const emoji = Helpers.addEmoji(item.type);
+            const number = ((page - 1) * itemsPerPage) + index + 1;
+            message += `${number}. ${emoji} <b>${item.title}</b>\n`;
+            message += `   📺 ${item.type} | 🎭 ${item.genre}\n`;
+            message += `   📅 ${Helpers.formatDate(item.created_at)}\n\n`;
+        });
+
+        message += `👇 Boshqarish uchun tanlang:`;
+
+        const keyboard = this.getContentManagementKeyboard(paginatedData.data, page, paginatedData.totalPages);
+
+        try {
+            await bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'HTML',
+                reply_markup: keyboard
+            });
+        } catch (error) {
+            await bot.sendMessage(chatId, message, {
+                parse_mode: 'HTML',
+                reply_markup: keyboard
+            });
+        }
+    }
+
+    getContentManagementKeyboard(content, page, totalPages) {
+        const keyboard = [];
+
+        // Content management buttons
+        content.forEach(item => {
+            const emoji = Helpers.addEmoji(item.type);
+            keyboard.push([
+                {
+                    text: `${emoji} ${Helpers.truncateText(item.title, 20)}`,
+                    callback_data: `admin_content_${item.id}`
+                }
+            ]);
+        });
+
+        // Pagination
+        if (totalPages > 1) {
+            const navButtons = [];
+
+            if (page > 1) {
+                navButtons.push({
+                    text: '⬅️ Oldingi',
+                    callback_data: `admin_content_page_${page - 1}`
+                });
+            }
+
+            navButtons.push({
+                text: `${page}/${totalPages}`,
+                callback_data: 'admin_current_page'
+            });
+
+            if (page < totalPages) {
+                navButtons.push({
+                    text: 'Keyingi ➡️',
+                    callback_data: `admin_content_page_${page + 1}`
+                });
+            }
+
+            keyboard.push(navButtons);
+        }
+
+        // Navigation
+        keyboard.push([
+            { text: '➕ Yangi Qo\'shish', callback_data: 'admin_add_content' },
+            { text: '🔙 Admin Panel', callback_data: 'admin_main' }
+        ]);
+
+        return { inline_keyboard: keyboard };
+    }
+
+    async startBroadcast(bot, chatId) {
+        const userId = bot.currentUserId; // You'll need to track this
+        
+        this.adminSessions.set(userId, {
+            action: 'broadcast',
+            step: 'message',
+            data: {}
+        });
+
+        await bot.sendMessage(chatId, `📢 <b>E'lon Yuborish</b>\n\n` +
+            `📝 Barcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yozing:\n\n` +
+            `⚠️ <i>E'lon barcha faol foydalanuvchilarga yuboriladi</i>`, {
+            parse_mode: 'HTML',
+            reply_markup: Keyboards.getCancelKeyboard()
+        });
+    }
+
+    async handleBroadcastMessage(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const text = msg.text;
+
+        const session = this.adminSessions.get(userId);
+        if (!session || session.action !== 'broadcast') return;
+
+        try {
+            // Get all users
+            const sheet = await sheetsService.doc.sheetsByTitle['users'];
+            const rows = await sheet.getRows();
+            
+            const confirmMessage = `📢 <b>E'lon Tasdiqlash</b>\n\n` +
+                `📝 <b>Xabar:</b>\n${text}\n\n` +
+                `👥 <b>Qabul qiluvchilar:</b> ${rows.length} foydalanuvchi\n\n` +
+                `❓ E'lonni yuborishni tasdiqlaysizmi?`;
+
+            await bot.sendMessage(chatId, confirmMessage, {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            { text: '✅ Ha, yuborish', callback_data: `admin_confirm_broadcast` },
+                            { text: '❌ Bekor qilish', callback_data: 'admin_cancel' }
+                        ]
+                    ]
+                }
+            });
+
+            session.data.message = text;
+            session.data.recipients = rows;
+
+        } catch (error) {
+            console.error('Broadcast message xatosi:', error);
+            this.adminSessions.delete(userId);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async executeBroadcast(bot, chatId, userId) {
+        const session = this.adminSessions.get(userId);
+        if (!session) return;
+
+        try {
+            const message = session.data.message;
+            const recipients = session.data.recipients;
+            let successCount = 0;
+            let errorCount = 0;
+
+            const statusMsg = await bot.sendMessage(chatId, `📤 E'lon yuborilmoqda...\n\n📊 0/${recipients.length}`);
+
+            for (let i = 0; i < recipients.length; i++) {
+                const recipient = recipients[i];
+                
+                try {
+                    await bot.sendMessage(recipient.user_id, `📢 <b>E'lon</b>\n\n${message}`, {
+                        parse_mode: 'HTML'
+                    });
+                    successCount++;
+                } catch (error) {
+                    errorCount++;
+                }
+
+                // Update progress every 10 users
+                if (i % 10 === 0 || i === recipients.length - 1) {
+                    await bot.editMessageText(
+                        `📤 E'lon yuborilmoqda...\n\n📊 ${i + 1}/${recipients.length}\n✅ Muvaffaqiyatli: ${successCount}\n❌ Xato: ${errorCount}`, 
+                        {
+                            chat_id: chatId,
+                            message_id: statusMsg.message_id
+                        }
+                    );
+                }
+
+                // Small delay to avoid rate limits
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+
+            await bot.editMessageText(
+                `✅ <b>E'lon yuborildi!</b>\n\n📊 <b>Natijalar:</b>\n✅ Muvaffaqiyatli: ${successCount}\n❌ Xato: ${errorCount}\n📈 Muvaffaqiyat: ${Math.round(successCount / recipients.length * 100)}%`, 
+                {
+                    chat_id: chatId,
+                    message_id: statusMsg.message_id,
+                    parse_mode: 'HTML'
+                }
+            );
+
+            this.adminSessions.delete(userId);
+
+        } catch (error) {
+            console.error('Execute broadcast xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+}
+
+module.exports = new AdminHandler();

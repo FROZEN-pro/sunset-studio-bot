@@ -1,0 +1,218 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+const config = require('../config');
+
+class HomeHandler {
+    static async handle(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        
+        try {
+            const isAdmin = await sheetsService.isAdmin(userId);
+            const userName = Helpers.formatUserName(msg.from);
+            
+            const homeMessage = `🏠 <b>Bosh Menyu</b>
+
+Salom, <b>${userName}</b>! 
+
+🎬 <b>${config.APP_NAME}</b> - anime va filmlar dunyosiga xush kelibsiz!
+
+📊 <b>Nima qilmoqchisiz?</b>
+🔥 <i>Mashhur</i> - Eng ko'p tomosha qilinayotgan kontentlar
+🔍 <i>Qidiruv</i> - O'zingiz yoqtirgan kontentni toping
+🎌 <i>Anime</i> - Anime seriallar va filmlar
+🎬 <i>Filmlar</i> - Eng yangi va mashhur filmlar
+
+👤 <b>Shaxsiy:</b>
+👤 <i>Profil</i> - Sizning profilingiz va statistika
+⚙️ <i>Sozlamalar</i> - Bot sozlamalari va yordam
+
+${isAdmin ? '🔑 <i>Admin Panel</i> - Boshqaruv paneli' : ''}
+
+👇 <b>Quyidagi tugmalardan birini tanlang:</b>`;
+
+            await bot.sendMessage(chatId, homeMessage, {
+                parse_mode: 'HTML',
+                reply_markup: isAdmin ? Keyboards.getAdminMenu() : Keyboards.getMainMenu()
+            });
+            
+        } catch (error) {
+            console.error('Home handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    static async handleTrending(bot, msg) {
+        const chatId = msg.chat.id;
+        
+        try {
+            const loadingMsg = await bot.sendMessage(chatId, Helpers.getLoadingMessage());
+            
+            const trendingContent = await sheetsService.getTrendingContent();
+            
+            if (trendingContent.length === 0) {
+                await bot.editMessageText('🔥 <b>Mashhur Kontentlar</b>\n\n❌ Hozircha mashhur kontentlar yo\'q', {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: Keyboards.getBackKeyboard()
+                });
+                return;
+            }
+
+            await bot.deleteMessage(chatId, loadingMsg.message_id);
+            
+            // Show trending content with pagination
+            await this.sendContentList(bot, chatId, trendingContent, '🔥 Mashhur Kontentlar', 1, 'trending');
+            
+        } catch (error) {
+            console.error('Trending handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getBackKeyboard()
+            });
+        }
+    }
+
+    static async handleAnime(bot, msg) {
+        const chatId = msg.chat.id;
+        
+        try {
+            const loadingMsg = await bot.sendMessage(chatId, Helpers.getLoadingMessage());
+            
+            const animeContent = await sheetsService.getContentByType('anime');
+            
+            if (animeContent.length === 0) {
+                await bot.editMessageText('🎌 <b>Anime Kontentlar</b>\n\n❌ Hozircha anime kontentlar yo\'q', {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: Keyboards.getBackKeyboard()
+                });
+                return;
+            }
+
+            await bot.deleteMessage(chatId, loadingMsg.message_id);
+            
+            // Show anime content with pagination
+            await this.sendContentList(bot, chatId, animeContent, '🎌 Anime Kontentlar', 1, 'anime');
+            
+        } catch (error) {
+            console.error('Anime handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getBackKeyboard()
+            });
+        }
+    }
+
+    static async handleMovies(bot, msg) {
+        const chatId = msg.chat.id;
+        
+        try {
+            const loadingMsg = await bot.sendMessage(chatId, Helpers.getLoadingMessage());
+            
+            const movieContent = await sheetsService.getContentByType('movie');
+            
+            if (movieContent.length === 0) {
+                await bot.editMessageText('🎬 <b>Film Kontentlar</b>\n\n❌ Hozircha film kontentlar yo\'q', {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: Keyboards.getBackKeyboard()
+                });
+                return;
+            }
+
+            await bot.deleteMessage(chatId, loadingMsg.message_id);
+            
+            // Show movie content with pagination
+            await this.sendContentList(bot, chatId, movieContent, '🎬 Film Kontentlar', 1, 'movie');
+            
+        } catch (error) {
+            console.error('Movies handler xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getBackKeyboard()
+            });
+        }
+    }
+
+    static async sendContentList(bot, chatId, content, title, page = 1, type = 'content') {
+        const itemsPerPage = 5;
+        const paginatedData = Helpers.paginate(content, page, itemsPerPage);
+        
+        let message = `${title}\n\n`;
+        
+        paginatedData.data.forEach((item, index) => {
+            const emoji = Helpers.addEmoji(item.type);
+            const number = ((page - 1) * itemsPerPage) + index + 1;
+            message += `${number}. ${emoji} <b>${item.title}</b>\n`;
+            message += `   📺 ${item.type} | ${item.genre}\n`;
+            message += `   📅 ${Helpers.formatDate(item.created_at)}\n\n`;
+        });
+        
+        if (paginatedData.totalPages > 1) {
+            message += `📄 <b>Sahifa:</b> ${paginatedData.currentPage}/${paginatedData.totalPages}\n`;
+            message += `📊 <b>Jami:</b> ${paginatedData.totalItems} ta kontent\n\n`;
+        }
+        
+        message += `👇 <i>Kontentni tanlash uchun quyidagi tugmalardan birini bosing:</i>`;
+
+        const keyboard = this.getContentListKeyboard(paginatedData.data, page, paginatedData.totalPages, type);
+        
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+        });
+    }
+
+    static getContentListKeyboard(contentList, currentPage, totalPages, type) {
+        const keyboard = [];
+        
+        // Content buttons
+        contentList.forEach(content => {
+            const emoji = Helpers.addEmoji(content.type);
+            keyboard.push([{
+                text: `${emoji} ${content.title}`,
+                callback_data: `content_${content.id}`
+            }]);
+        });
+        
+        // Pagination buttons
+        if (totalPages > 1) {
+            const navButtons = [];
+            
+            if (currentPage > 1) {
+                navButtons.push({
+                    text: '⬅️ Oldingi',
+                    callback_data: `${type}_page_${currentPage - 1}`
+                });
+            }
+            
+            navButtons.push({
+                text: `${currentPage}/${totalPages}`,
+                callback_data: 'current_page_info'
+            });
+            
+            if (currentPage < totalPages) {
+                navButtons.push({
+                    text: 'Keyingi ➡️',
+                    callback_data: `${type}_page_${currentPage + 1}`
+                });
+            }
+            
+            keyboard.push(navButtons);
+        }
+        
+        // Back to main menu
+        keyboard.push([{
+            text: '🏠 Bosh Menyu',
+            callback_data: 'main_menu'
+        }]);
+        
+        return { inline_keyboard: keyboard };
+    }
+}
+
+module.exports = HomeHandler;

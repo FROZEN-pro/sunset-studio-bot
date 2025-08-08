@@ -1,0 +1,78 @@
+module.exports = {
+    // Bot messages
+    MESSAGES: {
+        WELCOME: '🎬 Xush kelibsiz!',
+        ERROR_NETWORK: '🌐 Internet bilan bog\'lanishda xatolik',
+        ERROR_NOT_FOUND: '❌ Kerakli ma\'lumot topilmadi',
+        ERROR_PERMISSION: '🚫 Sizda bu amalni bajarish uchun ruxsat yo\'q',
+        SUCCESS_SAVED: '✅ Muvaffaqiyatli saqlandi',
+        LOADING: '⏳ Yuklanmoqda...'
+    },
+
+    // Content types
+    CONTENT_TYPES: {
+        ANIME: 'anime',
+        MOVIE: 'movie',
+        SERIES: 'series',
+        DOCUMENTARY: 'documentary'
+    },
+
+    // User roles
+    USER_ROLES: {
+        USER: 'user',
+        ADMIN: 'admin',
+        SUPER_ADMIN: 'super_admin'
+    },
+
+    // Pagination
+    PAGINATION: {
+        DEFAULT_LIMIT: 10,
+        MAX_LIMIT: 50,
+        SEARCH_LIMIT: 8,
+        EPISODES_LIMIT: 12
+    },
+
+    // File limits
+    FILE_LIMITS: {
+        IMAGE_MAX_SIZE: 10 * 1024 * 1024, // 10MB
+        VIDEO_MAX_SIZE: 50 * 1024 * 1024, // 50MB
+        DESCRIPTION_MAX_LENGTH: 1000,
+        TITLE_MAX_LENGTH: 100
+    },
+
+    // Genres
+    GENRES: [
+        'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy',
+        'Horror', 'Romance', 'Sci-Fi', 'Thriller', 'Mystery',
+        'Animation', 'Family', 'War', 'History', 'Music'
+    ],
+
+    // Emojis
+    EMOJIS: {
+        anime: '🎌',
+        movie: '🎬',
+        action: '⚔️',
+        comedy: '😄',
+        drama: '🎭',
+        romance: '💕',
+        adventure: '🗺️',
+        fantasy: '🧙‍♂️',
+        thriller: '😱',
+        horror: '👻',
+        'sci-fi': '🚀',
+        family: '👨‍👩‍👧‍👦'
+    },
+
+    // User levels
+    USER_LEVELS: [
+        { name: '🥉 Yangi boshlovchi', views: 0 },
+        { name: '🥈 Faol ko\'ruvchi', views: 10 },
+        { name: '🥇 Kontent sevuvchi', views: 50 },
+        { name: '⭐ Fan', views: 100 },
+        { name: '🌟 Super Fan', views: 200 },
+        { name: '🏆 Legend', views: 500 }
+    ],
+
+    // API endpoints
+    ENDPOINTS: {
+        IMGBB

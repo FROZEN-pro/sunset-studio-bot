@@ -1,0 +1,146 @@
+const config = require('../config');
+
+class Helpers {
+    // Matnni qisqartirish
+    static truncateText(text, maxLength = 100) {
+        if (text.length <= maxLength) return text;
+        return text.substr(0, maxLength) + '...';
+    }
+
+    // Foydalanuvchi nomini formatlash
+    static formatUserName(user) {
+        if (user.first_name && user.last_name) {
+            return `${user.first_name} ${user.last_name}`;
+        }
+        return user.first_name || user.username || 'Noma\'lum';
+    }
+
+    // Vaqtni formatlash
+    static formatDate(dateString) {
+        const date = new Date(dateString);
+        const options = { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+        };
+        return date.toLocaleDateString('uz-UZ', options);
+    }
+
+    // Raqamni formatlash
+    static formatNumber(num) {
+        if (num >= 1000000) {
+            return Math.floor(num / 1000000) + 'M';
+        }
+        if (num >= 1000) {
+            return Math.floor(num / 1000) + 'K';
+        }
+        return num.toString();
+    }
+
+    // HTML teglarni tozalash
+    static stripHtml(html) {
+        return html.replace(/<[^>]*>/g, '');
+    }
+
+    // Emoji qo'shish
+    static addEmoji(type) {
+        const emojis = {
+            anime: '🎌',
+            movie: '🎬',
+            action: '⚔️',
+            comedy: '😄',
+            drama: '🎭',
+            romance: '💕',
+            adventure: '🗺️',
+            fantasy: '🧙‍♂️',
+            thriller: '😱'
+        };
+        return emojis[type.toLowerCase()] || '📺';
+    }
+
+    // Loading animatsiyasi
+    static getLoadingMessage() {
+        const messages = [
+            '⏳ Yuklanmoqda...',
+            '🔄 Ma\'lumot olinmoqda...',
+            '📡 Serverga ulanmoqda...',
+            '🎬 Video tayyorlanmoqda...'
+        ];
+        return messages[Math.floor(Math.random() * messages.length)];
+    }
+
+    // Xato xabarlari
+    static getErrorMessage(type = 'default') {
+        const messages = {
+            network: '🌐 Internet bilan bog\'lanishda xatolik',
+            notfound: '❌ Kerakli ma\'lumot topilmadi',
+            permission: '🚫 Sizda bu amalni bajarish uchun ruxsat yo\'q',
+            default: '⚠️ Noma\'lum xatolik yuz berdi'
+        };
+        return messages[type] || messages.default;
+    }
+
+    // Muvaffaqiyat xabarlari
+    static getSuccessMessage(type = 'default') {
+        const messages = {
+            saved: '✅ Muvaffaqiyatli saqlandi',
+            updated: '✅ Muvaffaqiyatli yangilandi',
+            deleted: '✅ Muvaffaqiyatli o\'chirildi',
+            added: '✅ Muvaffaqiyatli qo\'shildi',
+            default: '✅ Amal muvaffaqiyatli bajarildi'
+        };
+        return messages[type] || messages.default;
+    }
+
+    // Sahifalash
+    static paginate(array, page = 1, limit = 10) {
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        
+        return {
+            data: array.slice(startIndex, endIndex),
+            currentPage: page,
+            totalPages: Math.ceil(array.length / limit),
+            totalItems: array.length,
+            hasNext: endIndex < array.length,
+            hasPrev: page > 1
+        };
+    }
+
+    // Deep link yaratish
+    static createDeepLink(contentId) {
+        return `https://t.me/${config.BOT_USERNAME}?start=content_${contentId}`;
+    }
+
+    // Qidiruv so'zlarini tozalash
+    static sanitizeSearchQuery(query) {
+        return query
+            .trim()
+            .toLowerCase()
+            .replace(/[^\w\s]/gi, '')
+            .substr(0, 100);
+    }
+
+    // Random ID yaratish
+    static generateRandomId(length = 8) {
+        const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+        let result = '';
+        for (let i = 0; i < length; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    // Fayl hajmini formatlash
+    static formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+}
+
+module.exports = Helpers;

@@ -1,0 +1,227 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+const config = require('../config');
+
+class SearchHandler {
+    constructor() {
+        // User search states
+        this.userSearchStates = new Map();
+    }
+
+    static async startSearch(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+
+        try {
+            // Set user in search mode
+            searchHandler.setUserSearchMode(userId, true);
+
+            const searchMessage = `🔍 <b>Qidiruv</b>\n\n` +
+                                 `📝 <b>Qidiruv so'zini kiriting:</b>\n\n` +
+                                 `💡 <i>Masalan:</i>\n` +
+                                 `• Anime nomi\n` +
+                                 `• Film nomi  \n` +
+                                 `• Janr (action, comedy, drama)\n` +
+                                 `• Kalit so'zlar\n\n` +
+                                 `👇 <i>Quyida matn yozing:</i>`;
+
+            await bot.sendMessage(chatId, searchMessage, {
+                parse_mode: 'HTML',
+                reply_markup: Keyboards.getCancelKeyboard()
+            });
+
+        } catch (error) {
+            console.error('Search handler - startSearch xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    static async handleSearchQuery(bot, msg) {
+        const chatId = msg.chat.id;
+        const userId = msg.from.id;
+        const query = msg.text;
+
+        try {
+            // Check cancel
+            if (query === '❌ Bekor Qilish') {
+                searchHandler.setUserSearchMode(userId, false);
+                await bot.sendMessage(chatId, '🏠 <b>Bosh Menyuga qaytdingiz</b>', {
+                    parse_mode: 'HTML',
+                    reply_markup: Keyboards.getMainMenu()
+                });
+                return;
+            }
+
+            // Search loading
+            const loadingMsg = await bot.sendMessage(chatId, '🔍 Qidirilmoqda...');
+
+            // Clean and validate query
+            const cleanQuery = Helpers.sanitizeSearchQuery(query);
+            
+            if (cleanQuery.length < 2) {
+                await bot.editMessageText('⚠️ <b>Qidiruv so\'zi juda qisqa</b>\n\nKamida 2 ta harf kiriting', {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: Keyboards.getCancelKeyboard()
+                });
+                return;
+            }
+
+            // Perform search
+            const results = await sheetsService.searchContent(cleanQuery);
+
+            // Clear user search mode
+            searchHandler.setUserSearchMode(userId, false);
+
+            // Delete loading message
+            await bot.deleteMessage(chatId, loadingMsg.message_id);
+
+            if (results.length === 0) {
+                await this.sendNoResultsMessage(bot, chatId, query);
+            } else {
+                await this.sendSearchResults(bot, chatId, results, query, 1);
+            }
+
+        } catch (error) {
+            console.error('Search handler - handleSearchQuery xatosi:', error);
+            searchHandler.setUserSearchMode(userId, false);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    static async sendNoResultsMessage(bot, chatId, query) {
+        const message = `🔍 <b>Qidiruv natijalari</b>\n\n` +
+                       `📝 <b>So'rov:</b> "${query}"\n` +
+                       `❌ <b>Natija topilmadi</b>\n\n` +
+                       `💡 <b>Maslahatlar:</b>\n` +
+                       `• Boshqa so'z bilan qidiring\n` +
+                       `• Umumiy janr nomlarini ishlating\n` +
+                       `• Imlo xatolarini tekshiring\n\n` +
+                       `🔄 <i>Yana qidirishni xohlasangiz, quyidagi tugmani bosing</i>`;
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🔍 Yana Qidirish', callback_data: 'start_search' },
+                        { text: '🏠 Bosh Menyu', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        });
+    }
+
+    static async sendSearchResults(bot, chatId, results, query, page = 1) {
+        const itemsPerPage = 5;
+        const paginatedResults = Helpers.paginate(results, page, itemsPerPage);
+        
+        let message = `🔍 <b>Qidiruv natijalari</b>\n\n`;
+        message += `📝 <b>So'rov:</b> "${query}"\n`;
+        message += `📊 <b>Topildi:</b> ${results.length} ta natija\n\n`;
+        
+        if (paginatedResults.totalPages > 1) {
+            message += `📄 <b>Sahifa:</b> ${paginatedResults.currentPage}/${paginatedResults.totalPages}\n\n`;
+        }
+        
+        message += `👇 <i>Kontentni tanlash uchun quyidagi tugmalardan birini bosing:</i>`;
+
+        const keyboard = Keyboards.getSearchResultsKeyboard(
+            paginatedResults.data, 
+            query, 
+            page
+        );
+
+        await bot.sendMessage(chatId, message, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard
+        });
+    }
+
+    static async handleSearchResults(bot, chatId, query, page, messageId) {
+        try {
+            const results = await sheetsService.searchContent(query);
+            
+            if (results.length === 0) {
+                await bot.editMessageText(`❌ "${query}" uchun natija topilmadi`, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🏠 Bosh Menyu', callback_data: 'main_menu' }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            const itemsPerPage = 5;
+            const paginatedResults = Helpers.paginate(results, page, itemsPerPage);
+            
+            let message = `🔍 <b>Qidiruv natijalari</b>\n\n`;
+            message += `📝 <b>So'rov:</b> "${query}"\n`;
+            message += `📊 <b>Topildi:</b> ${results.length} ta natija\n\n`;
+            
+            if (paginatedResults.totalPages > 1) {
+                message += `📄 <b>Sahifa:</b> ${paginatedResults.currentPage}/${paginatedResults.totalPages}\n\n`;
+            }
+            
+            message += `👇 <i>Kontentni tanlash uchun quyidagi tugmalardan birini bosing:</i>`;
+
+            const keyboard = Keyboards.getSearchResultsKeyboard(
+                paginatedResults.data, 
+                query, 
+                page
+            );
+
+            await bot.editMessageText(message, {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'HTML',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            console.error('Search handler - handleSearchResults xatosi:', error);
+            await bot.editMessageText(Helpers.getErrorMessage('network'), {
+                chat_id: chatId,
+                message_id: messageId,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🏠 Bosh Menyu', callback_data: 'main_menu' }]
+                    ]
+                }
+            });
+        }
+    }
+
+    setUserSearchMode(userId, inSearchMode) {
+        if (inSearchMode) {
+            this.userSearchStates.set(userId, true);
+        } else {
+            this.userSearchStates.delete(userId);
+        }
+    }
+
+    isUserInSearchMode(userId) {
+        return this.userSearchStates.has(userId);
+    }
+
+    static async getPopularSearches() {
+        // Bu funksiya keyinroq analytics uchun
+        return [
+            'anime', 'naruto', 'one piece', 'action', 'comedy'
+        ];
+    }
+}
+
+// Global instance yaratish
+const searchHandler = new SearchHandler();
+
+module.exports = SearchHandler;

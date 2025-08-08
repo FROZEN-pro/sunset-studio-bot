@@ -1,0 +1,316 @@
+const sheetsService = require('../services/sheets');
+const Keyboards = require('../utils/keyboards');
+const Helpers = require('../utils/helpers');
+
+class VideoHandler {
+    async showContent(bot, chatId, contentId, messageId = null) {
+        try {
+            const content = await sheetsService.getContentById(contentId);
+            
+            if (!content) {
+                const errorMsg = '❌ Kontent topilmadi yoki o\'chirilgan';
+                if (messageId) {
+                    await bot.editMessageText(errorMsg, {
+                        chat_id: chatId,
+                        message_id: messageId,
+                        reply_markup: Keyboards.getBackKeyboard()
+                    });
+                } else {
+                    await bot.sendMessage(chatId, errorMsg, {
+                        reply_markup: Keyboards.getBackKeyboard()
+                    });
+                }
+                return;
+            }
+
+            const message = this.formatContentMessage(content);
+            const hasEpisodes = content.episodes_data && content.episodes_data.length > 0;
+            const keyboard = Keyboards.getContentKeyboard(content.id, hasEpisodes);
+
+            if (content.image_url) {
+                if (messageId) {
+                    // Agar edit qilish mumkin bo'lmasa, yangi xabar yuborish
+                    try {
+                        await bot.editMessageText(message, {
+                            chat_id: chatId,
+                            message_id: messageId,
+                            parse_mode: 'HTML',
+                            reply_markup: keyboard
+                        });
+                    } catch (error) {
+                        await bot.sendPhoto(chatId, content.image_url, {
+                            caption: message,
+                            parse_mode: 'HTML',
+                            reply_markup: keyboard
+                        });
+                    }
+                } else {
+                    await bot.sendPhoto(chatId, content.image_url, {
+                        caption: message,
+                        parse_mode: 'HTML',
+                        reply_markup: keyboard
+                    });
+                }
+            } else {
+                if (messageId) {
+                    await bot.editMessageText(message, {
+                        chat_id: chatId,
+                        message_id: messageId,
+                        parse_mode: 'HTML',
+                        reply_markup: keyboard
+                    });
+                } else {
+                    await bot.sendMessage(chatId, message, {
+                        parse_mode: 'HTML',
+                        reply_markup: keyboard
+                    });
+                }
+            }
+
+        } catch (error) {
+            console.error('Show content xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'), {
+                reply_markup: Keyboards.getMainMenu()
+            });
+        }
+    }
+
+    async watchContent(bot, chatId, contentId) {
+        try {
+            const content = await sheetsService.getContentById(contentId);
+            
+            if (!content) {
+                await bot.sendMessage(chatId, '❌ Video topilmadi', {
+                    reply_markup: Keyboards.getMainMenu()
+                });
+                return;
+            }
+
+            // Video ma'lumotlarini tekshirish
+            if (!content.video_data || !content.video_data.file_id) {
+                await bot.sendMessage(chatId, '⚠️ Video fayli mavjud emas', {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔙 Orqaga', callback_data: `content_${contentId}` }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            // Loading xabari
+            const loadingMsg = await bot.sendMessage(chatId, '📺 Video yuklanmoqda...');
+
+            // Video yuborish
+            try {
+                await bot.sendVideo(chatId, content.video_data.file_id, {
+                    caption: `🎬 <b>${content.title}</b>\n\n${content.description}`,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '❤️ Sevimli', callback_data: `favorite_${contentId}` },
+                                { text: '📤 Ulashish', callback_data: `share_${contentId}` }
+                            ],
+                            [
+                                { text: '🔙 Orqaga', callback_data: `content_${contentId}` },
+                                { text: '🏠 Bosh Menyu', callback_data: 'main_menu' }
+                            ]
+                        ]
+                    }
+                });
+
+                await bot.deleteMessage(chatId, loadingMsg.message_id);
+
+            } catch (videoError) {
+                console.error('Video yuborish xatosi:', videoError);
+                
+                await bot.editMessageText('❌ Video yuborishda xatolik yuz berdi', {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '🔙 Orqaga', callback_data: `content_${contentId}` }]
+                        ]
+                    }
+                });
+            }
+
+        } catch (error) {
+            console.error('Watch content xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async showEpisodes(bot, chatId, contentId, page = 1, messageId = null) {
+        try {
+            const content = await sheetsService.getContentById(contentId);
+            
+            if (!content || !content.episodes_data || content.episodes_data.length === 0) {
+                const errorMsg = '❌ Epizodlar topilmadi';
+                if (messageId) {
+                    await bot.editMessageText(errorMsg, {
+                        chat_id: chatId,
+                        message_id: messageId,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '🔙 Orqaga', callback_data: `content_${contentId}` }]
+                            ]
+                        }
+                    });
+                } else {
+                    await bot.sendMessage(chatId, errorMsg);
+                }
+                return;
+            }
+
+            const episodes = content.episodes_data;
+            const itemsPerPage = 10;
+            const paginatedEpisodes = Helpers.paginate(episodes, page, itemsPerPage);
+
+            let message = `📺 <b>${content.title}</b>\n\n`;
+            message += `📋 <b>Epizodlar ro'yxati</b>\n`;
+            message += `📊 <b>Jami:</b> ${episodes.length} ta epizod\n\n`;
+
+            paginatedEpisodes.data.forEach((episode, index) => {
+                const number = ((page - 1) * itemsPerPage) + index + 1;
+                message += `${number}. 📺 <b>${episode.ep}-qism</b>\n`;
+                if (episode.title) {
+                    message += `   ${episode.title}\n`;
+                }
+                message += `\n`;
+            });
+
+            if (paginatedEpisodes.totalPages > 1) {
+                message += `📄 <b>Sahifa:</b> ${page}/${paginatedEpisodes.totalPages}\n\n`;
+            }
+
+            message += `👇 <i>Epizodni tanlang:</i>`;
+
+            const keyboard = Keyboards.getEpisodesKeyboard(
+                paginatedEpisodes.data, 
+                contentId, 
+                page, 
+                itemsPerPage
+            );
+
+            if (messageId) {
+                await bot.editMessageText(message, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    parse_mode: 'HTML',
+                    reply_markup: keyboard
+                });
+            } else {
+                await bot.sendMessage(chatId, message, {
+                    parse_mode: 'HTML',
+                    reply_markup: keyboard
+                });
+            }
+
+        } catch (error) {
+            console.error('Show episodes xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    async watchEpisode(bot, chatId, contentId, episodeNumber) {
+        try {
+            const content = await sheetsService.getContentById(contentId);
+            
+            if (!content || !content.episodes_data) {
+                await bot.sendMessage(chatId, '❌ Kontent yoki epizod topilmadi');
+                return;
+            }
+
+            const episode = content.episodes_data.find(ep => ep.ep == episodeNumber);
+            
+            if (!episode) {
+                await bot.sendMessage(chatId, `❌ ${episodeNumber}-qism topilmadi`, {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📺 Epizodlar', callback_data: `episodes_${contentId}` }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            if (!episode.file_id) {
+                await bot.sendMessage(chatId, `⚠️ ${episodeNumber}-qism fayli mavjud emas`, {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📺 Epizodlar', callback_data: `episodes_${contentId}` }]
+                        ]
+                    }
+                });
+                return;
+            }
+
+            // Loading xabari
+            const loadingMsg = await bot.sendMessage(chatId, `📺 ${episodeNumber}-qism yuklanmoqda...`);
+
+            // Episode yuborish
+            try {
+                const caption = `📺 <b>${content.title}</b> - ${episodeNumber}-qism\n\n${episode.title || ''}`;
+                
+                await bot.sendVideo(chatId, episode.file_id, {
+                    caption: caption,
+                    parse_mode: 'HTML',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                { text: '📺 Epizodlar', callback_data: `episodes_${contentId}` },
+                                { text: '❤️ Sevimli', callback_data: `favorite_${contentId}` }
+                            ],
+                            [
+                                { text: '🔙 Content', callback_data: `content_${contentId}` },
+                                { text: '🏠 Bosh Menyu', callback_data: 'main_menu' }
+                            ]
+                        ]
+                    }
+                });
+
+                await bot.deleteMessage(chatId, loadingMsg.message_id);
+
+            } catch (videoError) {
+                console.error('Episode yuborish xatosi:', videoError);
+                
+                await bot.editMessageText(`❌ ${episodeNumber}-qism yuborishda xatolik`, {
+                    chat_id: chatId,
+                    message_id: loadingMsg.message_id,
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📺 Epizodlar', callback_data: `episodes_${contentId}` }]
+                        ]
+                    }
+                });
+            }
+
+        } catch (error) {
+            console.error('Watch episode xatosi:', error);
+            await bot.sendMessage(chatId, Helpers.getErrorMessage('network'));
+        }
+    }
+
+    formatContentMessage(content) {
+        const emoji = Helpers.addEmoji(content.type);
+        const genreEmoji = Helpers.addEmoji(content.genre);
+        
+        let message = `${emoji} <b>${content.title}</b>\n\n`;
+        message += `${genreEmoji} <b>Janr:</b> ${content.genre}\n`;
+        message += `📺 <b>Tur:</b> ${content.type === 'anime' ? 'Anime' : 'Film'}\n`;
+        
+        if (content.episodes_data && content.episodes_data.length > 0) {
+            message += `📋 <b>Epizodlar:</b> ${content.episodes_data.length} ta\n`;
+        }
+        
+        message += `📅 <b>Qo'shildi:</b> ${Helpers.formatDate(content.created_at)}\n\n`;
+        message += `📝 <b>Tavsif:</b>\n${content.description}\n\n`;
+        message += `⭐ <i>Tomosha qilish uchun tugmani bosing</i>`;
+
+        return message;
+    }
+}
+
+module.exports = new VideoHandler();

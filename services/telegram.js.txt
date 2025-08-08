@@ -1,0 +1,99 @@
+const TelegramBot = require('node-telegram-bot-api');
+const config = require('../config');
+
+class TelegramService {
+    constructor() {
+        this.bot = null;
+    }
+
+    init(token) {
+        this.bot = new TelegramBot(token, { polling: false });
+        return this.bot;
+    }
+
+    async sendToChannel(channelId, content) {
+        try {
+            if (content.type === 'video') {
+                return await this.bot.sendVideo(channelId, content.file, {
+                    caption: content.caption,
+                    parse_mode: 'HTML'
+                });
+            } else if (content.type === 'photo') {
+                return await this.bot.sendPhoto(channelId, content.file, {
+                    caption: content.caption,
+                    parse_mode: 'HTML'
+                });
+            } else {
+                return await this.bot.sendMessage(channelId, content.text, {
+                    parse_mode: 'HTML'
+                });
+            }
+        } catch (error) {
+            console.error('Send to channel xatosi:', error);
+            throw error;
+        }
+    }
+
+    async getFileLink(fileId) {
+        try {
+            const file = await this.bot.getFile(fileId);
+            return `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${file.file_path}`;
+        } catch (error) {
+            console.error('Get file link xatosi:', error);
+            throw error;
+        }
+    }
+
+    async downloadFile(fileId) {
+        try {
+            const file = await this.bot.getFile(fileId);
+            const fileUrl = `https://api.telegram.org/file/bot${config.BOT_TOKEN}/${file.file_path}`;
+            
+            const axios = require('axios');
+            const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+            
+            return {
+                buffer: Buffer.from(response.data),
+                filename: file.file_path.split('/').pop(),
+                mimeType: this.getMimeType(file.file_path)
+            };
+        } catch (error) {
+            console.error('Download file xatosi:', error);
+            throw error;
+        }
+    }
+
+    getMimeType(filePath) {
+        const ext = filePath.split('.').pop().toLowerCase();
+        const mimeTypes = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'mp4': 'video/mp4',
+            'mov': 'video/quicktime',
+            'avi': 'video/x-msvideo'
+        };
+        return mimeTypes[ext] || 'application/octet-stream';
+    }
+
+    async getChatMember(chatId, userId) {
+        try {
+            return await this.bot.getChatMember(chatId, userId);
+        } catch (error) {
+            console.error('Get chat member xatosi:', error);
+            return null;
+        }
+    }
+
+    async getChatInfo(chatId) {
+        try {
+            return await this.bot.getChat(chatId);
+        } catch (error) {
+            console.error('Get chat info xatosi:', error);
+            return null;
+        }
+    }
+}
+
+module.exports = new TelegramService();
